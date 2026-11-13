@@ -83,6 +83,18 @@ jobs:
         run: |
           find crates/ivac-tauri/gen/android/buildSrc -name "*.kt" -exec sh -c 'echo "=== $1"; cat "$1"' _ {} \;
 
+      - name: Patch generated Gradle plugin (projectDir + tauri launcher)
+        run: |
+          D=crates/ivac-tauri/gen/android/buildSrc/src/main/java/org/opcenter/ivacam/kotlin
+          # 1) BuildTask declares @Input projectDir but RustPlugin never sets it
+          sed -i '/rootDirRel = config.rootDirRel/a\                        projectDir = project.projectDir.absolutePath' "$D/RustPlugin.kt"
+          # 2) template runs "node tauri ..."; call the globally installed CLI directly
+          sed -i 's#"""node"""#"""tauri"""#' "$D/BuildTask.kt"
+          sed -i 's#listOf("tauri", "android", "android-studio-script")#listOf("android", "android-studio-script")#' "$D/BuildTask.kt"
+          grep -n "projectDir" "$D/RustPlugin.kt"
+          grep -n -E 'val executable|val args' "$D/BuildTask.kt"
+          which tauri
+
       - name: Build debug APK (arm64 + universal)
         run: tauri android build --debug --apk --target aarch64
         working-directory: crates/ivac-tauri
@@ -95,3 +107,4 @@ jobs:
           name: ivacam-android-debug-apk
           path: crates/ivac-tauri/gen/android/app/build/outputs/apk/**/*.apk
           if-no-files-found: error
+          
