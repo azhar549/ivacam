@@ -1,0 +1,87 @@
+name: Android APK (debug)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      # .cargo/config.toml sets sccache as rustc-wrapper; empty value disables it in CI
+      RUSTC_WRAPPER: ""
+      NDK_VERSION: "27.2.12479018"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reference checkouts (as in BUILDING.md)
+        run: |
+          mkdir -p refs
+          git clone --depth 1 https://github.com/multigcs/viaconstructor refs/viaconstructor
+          git clone --depth 1 https://github.com/IxMilia/dxf-rs refs/dxf-rs
+
+      - name: System packages
+        run: sudo apt-get update && sudo apt-get install -y build-essential pkg-config libssl-dev
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Rust toolchain (pinned) + targets
+        run: |
+          rustup show
+          rustup target add wasm32-unknown-unknown \
+            aarch64-linux-android armv7-linux-androideabi \
+            i686-linux-android x86_64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
+
+      - name: Android SDK / NDK
+        run: |
+          SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKM" --licenses > /dev/null || true
+          "$SDKM" --install "platform-tools" "platforms;android-34" \
+            "build-tools;34.0.0" "ndk;${NDK_VERSION}" "cmake;3.22.1"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
+
+      - name: Build WASM pkg (needed before pnpm install)
+        run: wasm-pack build crates/ivac-wasm --target web --release
+
+      - name: Frontend deps
+        run: pnpm install --frozen-lockfile
+        working-directory: frontend
+
+      - name: Tauri CLI
+        run: npm install -g @tauri-apps/cli@^2
+
+      - name: Scaffold Android project
+        run: tauri android init --ci
+        working-directory: crates/ivac-tauri
+
+      - name: Build debug APK (arm64 + universal)
+        run: tauri android build --debug --apk --target aarch64
+        working-directory: crates/ivac-tauri
+
+      - name: List APKs
+        run: find crates/ivac-tauri/gen/android -name "*.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ivacam-android-debug-apk
+          path: crates/ivac-tauri/gen/android/app/build/outputs/apk/**/*.apk
+          if-no-files-found: error
+          
