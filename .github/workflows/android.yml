@@ -72,6 +72,17 @@ jobs:
         run: tauri android init --ci
         working-directory: crates/ivac-tauri
 
+      - name: Pin Gradle wrapper to 8.13 (8.14.x rejects the generated rust plugin)
+        run: |
+          F=crates/ivac-tauri/gen/android/gradle/wrapper/gradle-wrapper.properties
+          sed -i 's#gradle-[0-9.]*-bin.zip#gradle-8.13-bin.zip#' "$F"
+          cat "$F"
+
+      - name: Dump generated Gradle rust plugin (diagnostics)
+        continue-on-error: true
+        run: |
+          find crates/ivac-tauri/gen/android/buildSrc -name "*.kt" -exec sh -c 'echo "=== $1"; cat "$1"' _ {} \;
+
       - name: Build debug APK (arm64 + universal)
         run: tauri android build --debug --apk --target aarch64
         working-directory: crates/ivac-tauri
@@ -84,4 +95,3 @@ jobs:
           name: ivacam-android-debug-apk
           path: crates/ivac-tauri/gen/android/app/build/outputs/apk/**/*.apk
           if-no-files-found: error
-          
